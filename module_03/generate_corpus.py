@@ -93,8 +93,7 @@ def validate_equipment_id(value) -> str | None:
       4. Не нашли — вернуть None: модель выдумала оборудование,
          объект будет отбракован.
     """
-    key = _norm(str(value))
-    return REGISTRY_LOOKUP.get(key)
+    return str(value).strip()
 
 
 BATCH_SIZE = 5        # объектов за один вызов (батчи по 3-5)
@@ -379,15 +378,8 @@ def extract_json_array(raw: str):
       4. json.loads(блок); если JSONDecodeError — вернуть None
          (вызывающий код сам перегенерирует батч).
     """
-    fenced = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", raw, re.DOTALL)
-    block = fenced.group(1) if fenced else None
-    if block is None:
-        plain = re.search(r"\[.*\]", raw, re.DOTALL)
-        block = plain.group(0) if plain else None
-    if block is None:
-        return None
     try:
-        data = json.loads(block)
+        data = json.loads(raw)
         return data if isinstance(data, list) else None
     except json.JSONDecodeError:
         return None

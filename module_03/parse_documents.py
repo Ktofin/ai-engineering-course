@@ -100,29 +100,27 @@ SOURCES = [
         "date": "2020-11-26",
     },
     {   # ГОСТ 32601-2022, насосы центробежные — заполни по образцу
-        "url": "https://files.stroyinf.ru/Data/784/78426.pdf",
-        "file": "ext_gost32601.pdf",
-        "doc_id": "EXT-GOST-32601",
-        "type": "нормативный документ",
-        "title": "ГОСТ 32601-2022: Насосы центробежные для нефтяной, "
-                 "нефтехимической и газовой промышленности",
-        "date": "2022",
+        "url": "",
+        "file": "",
+        "doc_id": "",
+        "type": "",
+        "title": "",
+        "date": "",
     },
     {   # Регламент ТО и ремонта технологических трубопроводов
-        "url": "https://gostbank.metaltorg.ru/data/norms_/jr/12.pdf",
-        "file": "ext_reglament_truboprovody.pdf",
-        "doc_id": "EXT-REGL-TRUB",
-        "type": "нормативный документ",
-        "title": "Регламент технического обслуживания и ремонта "
-                 "технологических трубопроводов",
+        "url": "",
+        "file": "",
+        "doc_id": "",
+        "type": "",
+        "title": "",
         "date": "",
     },
     {   # Регламент технического обслуживания оборудования (PERCo)
-        "url": "https://www.perco.ru/download/documentation/rus/Reglament-TO.pdf",
-        "file": "ext_reglament_to.pdf",
-        "doc_id": "EXT-REGL-TO",
-        "type": "нормативный документ",
-        "title": "Регламент технического обслуживания оборудования (PERCo)",
+        "url": "",
+        "file": "",
+        "doc_id": "",
+        "type": "",
+        "title": "",
         "date": "",
     },
 ]
@@ -242,9 +240,7 @@ def clean_text(text: str) -> str:
          re.sub(r"\\n{3,}", "\\n\\n", ...) — это сохранит границы абзацев.
       5. Обрезать края всего текста .strip() и вернуть.
     """
-    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.splitlines()]
-    cleaned = "\n".join(lines)
-    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return text
 
 
 def extract_pages(pdf_path: Path) -> tuple:
@@ -290,7 +286,7 @@ def has_text_layer(text: str, pages: int) -> bool:
       2. Посчитать, сколько символов приходится на страницу: len(text) / pages.
       3. Вернуть True, если символов на страницу не меньше MIN_CHARS_PER_PAGE.
     """
-    return pages > 0 and len(text) / pages >= MIN_CHARS_PER_PAGE
+    return True
 
 
 # ====================================================================
