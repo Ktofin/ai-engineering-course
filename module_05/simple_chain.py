@@ -68,7 +68,16 @@ def make_llm() -> GigaChat:
 #     свой промпт оттуда подходит почти без правок);
 #   * в конце промпта — подстановка обращения: Обращение: "{question}" ->
 # ------------------------------------------------------------------
-CLASSIFY_PROMPT = ""
+CLASSIFY_PROMPT = """Определи категорию обращения сотрудника промышленного предприятия.
+Ответь ОДНИМ словом из списка: регламент, доступ, инцидент, документация.
+
+Примеры:
+Обращение: "Станок ЧПУ выдаёт ошибку шпинделя и встал" -> инцидент
+Обращение: "Заведите учётную запись новому технологу" -> доступ
+Обращение: "В какой срок нужно оформить карточку инцидента после остановки?" -> регламент
+Обращение: "Скиньте паспорт на редуктор Р-12, не нашёл в папке" -> документация
+
+Обращение: "{question}" ->"""
 
 
 def pick_category(raw: str) -> str:
@@ -84,7 +93,15 @@ def pick_category(raw: str) -> str:
       * не нашлась ни одна — верни «не определено».
     В Модуле 2 эта функция была дана готовой — теперь напиши её сам.
     """
-    raise NotImplementedError("TODO 2: разбор ответа модели")
+    text = raw.lower()
+    if "категория" in text:
+        text = text.split("категория", 1)[1]
+
+    found = [(text.find(c), c) for c in CATEGORIES if c in text]
+    if not found:
+        return "не определено"
+    found.sort()
+    return found[0][1]
 
 
 def build_classify_chain(model):
@@ -97,7 +114,12 @@ def build_classify_chain(model):
       RunnableLambda(pick_category)                      — строка -> категория.
     Обычная функция становится звеном цепочки через RunnableLambda.
     """
-    raise NotImplementedError("TODO 3: промпт | модель | парсер | категория")
+    return (
+        ChatPromptTemplate.from_template(CLASSIFY_PROMPT)
+        | model
+        | StrOutputParser()
+        | RunnableLambda(pick_category)
+    )
 
 
 # ====================================================================
@@ -137,7 +159,13 @@ def rag_node(payload: dict) -> dict:
         список источников пуст: базе ответ неизвестен, и пересказывать
         догадку модели вместо документа нельзя.
     """
-    raise NotImplementedError("TODO 4: RAG-ветка")
+    result = rag_answer(payload["question"])
+    return {
+        "category": payload["category"],
+        "answer": result["answer"],
+        "sources": result["sources"],
+        "action": "ответ" if result["sources"] else "специалисту",
+    }
 
 
 def generate_node(payload: dict, model) -> dict:
@@ -162,7 +190,17 @@ def route_answer(payload: dict, model) -> dict:
         {"category": category, "sources": [], "action": "специалисту",
          "answer": "Не удалось определить тип обращения — передаю оператору."}
     """
-    raise NotImplementedError("TODO 5: выбор ветки по категории")
+    category = payload["category"]
+    if category in RAG_CATEGORIES:
+        return rag_node(payload)
+    if category in ANSWER_PROMPTS:
+        return generate_node(payload, model)
+    return {
+        "category": category,
+        "answer": "Не удалось определить тип обращения — передаю оператору.",
+        "sources": [],
+        "action": "специалисту",
+    }
 
 
 def build_full_chain(model):
