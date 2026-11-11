@@ -114,7 +114,27 @@ def classify(question: dict, hits, result: dict) -> str:
          (без учёта регистра), иначе -> generation_error
       5) Иначе -> ok
     """
-    # TODO 1: замени заглушку на реализацию по шагам выше
+    ans = (result.get("answer") or "").strip()
+    is_refusal = (
+        ans.strip("«»\"'. ").lower() == REFUSAL_TEXT.rstrip(".").lower()
+        or result.get("refused_by") == "score"
+    )
+
+    if not question.get("in_corpus", False):
+        return "ok" if is_refusal else "hallucination"
+
+    if is_refusal:
+        return "over_refusal"
+
+    expected = question.get("expected") or []
+    sources = result.get("sources") or []
+    if expected and not any(doc_id in sources for doc_id in expected):
+        return "retrieval_error"
+
+    must_contain = question.get("must_contain") or ""
+    if must_contain and must_contain.lower() not in ans.lower():
+        return "generation_error"
+
     return "ok"
 
 
@@ -136,14 +156,38 @@ def llm_judge(question: str, context: str, answer_text: str) -> dict:
       answer_relevance, context_relevance, answer_faithfulness,
       overall_verdict, reason
     """
-    # TODO 2: замени заглушку на реальный вызов судьи
-    return {
-        "answer_relevance": "low",
-        "context_relevance": "low",
-        "answer_faithfulness": "low",
-        "overall_verdict": "error",
-        "reason": "TODO 2: llm_judge не реализован",
-    }
+    user_msg = (
+        f"ВОПРОС:\n{question}\n\n"
+        f"КОНТЕКСТ:\n{context}\n\n"
+        f"ОТВЕТ:\n{answer_text}"
+    )
+    try:
+        creds = (os.getenv("GIGACHAT_CREDENTIALS") or "").strip().strip("\"'")
+        with GigaChat(
+            credentials=creds,
+            scope=os.getenv("GIGACHAT_SCOPE", "GIGACHAT_API_PERS"),
+            verify_ssl_certs=False,
+        ) as giga:
+            response = giga.chat({
+                "messages": [
+                    {"role": "system", "content": JUDGE_SYSTEM},
+                    {"role": "user", "content": user_msg},
+                ],
+                "model": "GigaChat",
+                "temperature": 0.0,
+                "max_tokens": 500,
+            })
+        raw = response.choices[0].message.content.strip()
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start == -1 or end == -1 or end < start:
+            raise ValueError(f"JSON не найден в ответе судьи: {raw!r}")
+        parsed = json.loads(raw[start:end + 1])
+        if not isinstance(parsed, dict):
+            raise ValueError(f"Ожидался JSON-объект, получено: {type(parsed).__name__}")
+        return parsed
+    except Exception as e:
+        return {"overall_verdict": "error", "reason": str(e)}
 
 
 # ====================================================================
@@ -332,14 +376,39 @@ def sweep_chunking(client, model, alias: str):
     col = f"{'Размер чанка / перекрытие':<26}"
     print(f"\n  {col} | {'чанков':>7} | {'✓ по разметке':>14} | {'✓ по судье':>10}")
     print("  " + _SEP[:72])
-    original = (ingestion.CHUNK_SIZE, ingestion.OVERLAP)
-    # TODO 3: перебор здесь
-    ingestion.CHUNK_SIZE, ingestion.OVERLAP = original
+    try:
+        for size, overlap in CHUNK_COMBOS:
+            ingestion.CHUNK_SIZE = size
+            ingestion.OVERLAP = overlap
+            manifest, _ = ingestion.build_index(client, model)
+            counts = run_eval(client, model, alias, verbose=False)
+
+            in_corpus_rows = [r for r in counts["_rows"] if r["in_corpus"]]
+            markup_ok = sum(1 for r in in_corpus_rows if r["markup"] == "ok")
+            judge_ok = sum(
+                1 for r in in_corpus_rows
+                if r["judgment"].get("overall_verdict") == "ok"
+            )
+
+            label = f"{size:>4} / {overlap:<19}"
+            mk_str = f"{markup_ok} / {in_corpus_total}"
+            jg_str = f"{judge_ok} / {in_corpus_total}"
+            print(f"  {label} | {manifest['chunks']:>7} | {mk_str:>14} | {jg_str:>10}")
+    finally:
+        ingestion.CHUNK_SIZE, ingestion.OVERLAP = 600, 150
+        ingestion.build_index(client, model)
 
 
 # ====================================================================
 #  КОНФЛИКТ ВЕРСИЙ ОДНОГО РЕГЛАМЕНТА
 # ====================================================================
+
+def _hit_doc_key(hit) -> tuple[str, str]:
+    """Возвращает пару (базовый doc_id без -OLD, дата) для разрешения конфликтов."""
+    payload = getattr(hit, "payload", None) or {}
+    doc_id = payload.get("doc_id", "")
+    return doc_id.removesuffix("-OLD"), payload.get("date") or ""
+
 
 def resolve_conflicts(hits):
     """Если в выдаче несколько версий одного регламента — оставляет свежую.
@@ -360,7 +429,16 @@ def resolve_conflicts(hits):
     (строки ГГГГ-ММ-ДД сравниваются как даты), остальные выбросить.
     Порядок и score оставшихся точек не менять.
     """
-    return hits
+    max_date = {}
+    for h in hits:
+        base_id, date = _hit_doc_key(h)
+        if base_id not in max_date or date > max_date[base_id]:
+            max_date[base_id] = date
+
+    return [
+        h for h in hits
+        if (key := _hit_doc_key(h))[1] == max_date[key[0]]
+    ]
 
 
 def demo_conflict(client, model, alias: str):
